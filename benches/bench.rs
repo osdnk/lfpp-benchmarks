@@ -76,7 +76,7 @@ fn bench_lfpp(c: &mut Criterion) {
         )
     });
 
-    // 291.54 ms
+    // 443.76 ms
     c.bench_function("lfpp compute extension commitment", |b| {
         b.iter_with_setup(
             || {
@@ -87,6 +87,15 @@ fn bench_lfpp(c: &mut Criterion) {
             |(mut operand1, mut operand2)| {
                 for _ in 0..WIT_DIM * LOG_B {
                     fully_splitting_ntt_multiplication(&mut operand1, &mut operand2);
+                    unsafe {
+                        eltwise_add_mod(
+                            black_box(operand1.data).as_mut_ptr(),
+                            black_box(operand1.data).as_ptr(),
+                            black_box(operand2.data).as_ptr(),
+                            N as u64,
+                            MOD_Q,
+                        );
+                    }
                 }
 
             }, 
