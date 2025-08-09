@@ -1,135 +1,109 @@
-#![feature(generic_const_exprs)]
-
 use std::hint::black_box;
-use ring_arith::cyclotomic_ring::{*};
-use criterion::{criterion_group, criterion_main, Criterion, BatchSize};
-use tfhe_ntt::{prime::largest_prime_in_arithmetic_progression64, *};
+use ring_arith::{cyclotomic_ring::*, hexl::bindings::eltwise_add_mod};
+use criterion::{criterion_group, criterion_main, Criterion};
 
-macro_rules! bench_polynomial_multiplication {
-    ( $( ($p:expr, $n:expr) ),* ) => {
-        pub fn polynomial_multiplication(c: &mut Criterion) {
-            $(
-                let backend = if cfg!(feature = "hexl") {
-                    "hexl"
-                } else if cfg!(feature = "tfhe") {
-                    "zama"
-                } else {
-                    "unknown"
-                };
-                let bench_name = format!("NTT::fwd backend={} (p={}, n={})", backend, $p.1, $n);
-                c.bench_function(&bench_name, |b| {
-                    b.iter_batched(
-                        || {
-                            let mut ring = CyclotomicRing::< { $p.0 }, { $n }>::random();
-                            ring.to_ntt_representation();
-                            ring
-                        },
-                        |mut ring| {
-                            ring.to_ntt_representation();
-                        },
-                        BatchSize::LargeInput,
-                    );
-                });
-
-                let bench_name = format!("NTT::inv backend={} (p={}, n={})", backend, $p.1, $n);
-                c.bench_function(&bench_name, |b| {
-
-                    b.iter_batched(
-                        || {
-                            let mut ring = CyclotomicRing::< { $p.0 }, { $n }>::random();
-                            ring.to_ntt_representation();
-                            ring
-                        },
-                        |mut ring| {
-                            ring.to_coeff_representation();
-                        },
-                        BatchSize::LargeInput,
-                    );
-                });
-
-                let bench_name = format!("NTT::mul backend={} (p={}, n={})", backend, $p.1, $n);
-                c.bench_function(&bench_name, |b| {
-
-                    b.iter_batched(
-                        || {
-                            let mut left = CyclotomicRing::< { $p.0 }, { $n }>::random();
-                            let mut right = CyclotomicRing::< { $p.0 }, { $n }>::random();
-                            right.to_ntt_representation();
-                            left.to_ntt_representation();
-                            (right, left)
-                        },
-                        |(mut right, mut left)| {
-                            let mut result = CyclotomicRing::fully_splitting_ntt_multiplication(&mut left, &mut right);
-                        },
-                        BatchSize::LargeInput
-                    )
-                });
+const N: usize = 64;
+// const MOD_Q: u64 = 4546383823830515713; // Example modulus
+const MOD_Q: u64 = 1125899904679937; // Example modulus IFMA
+// 1125899904679937
+const K: usize = 2; 
+const WIT_DIM: usize = 1048576; // 2^20
+const LOG_B:usize = 10;
 
 
-                let bench_name = format!("NTT::full backend={} (p={}, n={})", backend, $p.1, $n);
-                c.bench_function(&bench_name, |b| {
-                    b.iter_batched(
-                        || {
-                            let mut left = CyclotomicRing::< { $p.0 }, { $n }>::random();
-                            let mut right = CyclotomicRing::< { $p.0 }, { $n }>::random();
-                            (right, left)
-                        },
-                        |(mut right, mut left)| {
-                            let mut result = CyclotomicRing::fully_splitting_ntt_multiplication(&mut left, &mut right);
-                            result.to_coeff_representation();
-                        },
-                        BatchSize::LargeInput
-                    )
-                });
-
-                // Benchmark 4: Incomplete NTT
-                /*let bench_name = format!("partial NTT multiplication (q={}, n={})", $p, $n);
-                c.bench_function(&bench_name, |b| {
-                    let mut operand1 = ring1.clone();
-                    let mut operand2 = ring2.clone();
-                    b.iter(|| incomplete_ntt_multiplication(black_box(&mut operand1), black_box(&mut operand2)))
-                });
-                */
-            )*
+fn add_avx512(data: [u64; N], other: [u64; N]) -> [u64; N] {
+    use std::arch::x86_64::*;
+    #[cfg(target_feature = "avx512f")]
+    unsafe {
+        let mut result = [0u64; N];
+        let chunks = N / 8;
+        for i in 0..chunks {
+            let a = _mm512_loadu_si512(data.as_ptr().add(i * 8) as *const _);
+            let b = _mm512_loadu_si512(other.as_ptr().add(i * 8) as *const _);
+            let sum = _mm512_add_epi64(a, b);
+            _mm512_storeu_si512(result.as_mut_ptr().add(i * 8) as *mut _, sum);
         }
-    };
+        return result;
+    }
+    panic!("AVX512 is not supported on this architecture");
 }
 
 
-type PrimeTest = (u64, &'static str);
 
-const P1: PrimeTest = (largest_prime_in_arithmetic_progression64(1 << 16, 1, 1 << 50, 1 << 51).unwrap(), "51 bits");
-const P2: PrimeTest = (largest_prime_in_arithmetic_progression64(1 << 16, 1, 1 << 62, 1 << 63).unwrap(), "63 bits");
-const P3: PrimeTest = (prime64::Solinas::P, "64 bits Solinas");
-const P4: PrimeTest = (largest_prime_in_arithmetic_progression64(1 << 16, 1, 1 << 63, u64::MAX).unwrap(), "64 bits");
+fn bench_lfpp(c: &mut Criterion) {
+    // 3.2501
+    c.bench_function("lfp compute double commitment", |b| {
+        b.iter_with_setup(
+            || {
+                let mut operand1 = CyclotomicRing::<MOD_Q, N>::random();
+                let mut operand2 = CyclotomicRing::<MOD_Q, N>::random();
+                (operand1, operand2)
+            },
+            |(mut operand1, mut operand2)| {
+                unsafe {
+                    for _ in 0..WIT_DIM * K * N {
+                        eltwise_add_mod(
+                            black_box(operand1.data).as_mut_ptr(),
+                            black_box(operand1.data).as_ptr(),
+                            black_box(operand2.data).as_ptr(),
+                            N as u64,
+                            MOD_Q,
+                        );
+                    }
+                }
+            }, 
+        )
+    });
+
+    // 1.3090 s
+    c.bench_function("lfp compute double commitment no mod", |b| {
+        b.iter_with_setup(
+            || {
+                let mut operand1 = CyclotomicRing::<MOD_Q, N>::random();
+                let mut operand2 = CyclotomicRing::<MOD_Q, N>::random();
+                (operand1, operand2)
+            },
+            |(mut operand1, mut operand2)| {
+                unsafe {
+                    for _ in 0..WIT_DIM * K * N {
+                        add_avx512(
+                            black_box(operand1.data),
+                            black_box(operand2.data),
+                        );
+                    }
+                }
+            }, 
+        )
+    });
+
+    // 291.54 ms
+    c.bench_function("lfpp compute extension commitment", |b| {
+        b.iter_with_setup(
+            || {
+                let mut operand1 = CyclotomicRing::<MOD_Q, N>::random();
+                let mut operand2 = CyclotomicRing::<MOD_Q, N>::random();
+                (operand1, operand2)
+            },
+            |(mut operand1, mut operand2)| {
+                for _ in 0..WIT_DIM * LOG_B {
+                    fully_splitting_ntt_multiplication(&mut operand1, &mut operand2);
+                }
+
+            }, 
+        )
+    });
+}
 
 
-bench_polynomial_multiplication!(
-    (P1, 256),
-    (P1, 512),
-    (P1, 1024),
-    (P1, 2048),
-    (P1, 4096),
-    (P2, 256),
-    (P2, 512),
-    (P2, 1024),
-    (P2, 2048),
-    (P2, 4096),
-    (P3, 256),
-    (P3, 512),
-    (P3, 1024),
-    (P3, 2048),
-    (P3, 4096),
-    (P4, 256),
-    (P4, 512),
-    (P4, 1024),
-    (P4, 2048),
-    (P4, 4096)
-);
 
-criterion_group!{
+
+fn configure_criterion() -> Criterion {
+    Criterion::default().sample_size(10)
+}
+
+criterion_group! {
     name = benches;
-    config = Criterion::default().sample_size(10);
-    targets = polynomial_multiplication
+    config = configure_criterion();
+    targets = bench_lfpp
 }
 criterion_main!(benches);
