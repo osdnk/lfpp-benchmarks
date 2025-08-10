@@ -1,3 +1,5 @@
+#![feature(stdarch_x86_avx512)]
+
 use std::hint::black_box;
 use ring_arith::{cyclotomic_ring::*, hexl::bindings::eltwise_add_mod};
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -117,7 +119,7 @@ fn bench_lfpp(c: &mut Criterion) {
 
 
 fn configure_criterion() -> Criterion {
-    Criterion::default().sample_size(50)
+    Criterion::default().sample_size(20)
 }
 
 criterion_group! {
