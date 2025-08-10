@@ -8,7 +8,7 @@ const MOD_Q: u64 = 1125899904679937; // Example modulus IFMA
 // 1125899904679937
 const K: usize = 2; 
 const WIT_DIM: usize = 1048576; // 2^20
-const LOG_B:usize = 10;
+const LOG_B:usize = 11;
 
 
 fn add_avx512(data: [u64; N], other: [u64; N]) -> [u64; N] {
@@ -31,7 +31,7 @@ fn add_avx512(data: [u64; N], other: [u64; N]) -> [u64; N] {
 
 
 fn bench_lfpp(c: &mut Criterion) {
-    // 3.2501
+    // 2.0432 s
     c.bench_function("lfp compute double commitment", |b| {
         b.iter_with_setup(
             || {
@@ -43,9 +43,9 @@ fn bench_lfpp(c: &mut Criterion) {
                 unsafe {
                     for _ in 0..WIT_DIM * K * N {
                         eltwise_add_mod(
-                            black_box(operand1.data).as_mut_ptr(),
-                            black_box(operand1.data).as_ptr(),
-                            black_box(operand2.data).as_ptr(),
+                            black_box(operand1.clone().data).as_mut_ptr(),
+                            black_box(operand1.clone().data).as_ptr(),
+                            black_box(operand2.clone().data).as_ptr(),
                             N as u64,
                             MOD_Q,
                         );
@@ -55,7 +55,7 @@ fn bench_lfpp(c: &mut Criterion) {
         )
     });
 
-    // 1.3090 s
+    // 1.3041 s
     c.bench_function("lfp compute double commitment no mod", |b| {
         b.iter_with_setup(
             || {
@@ -67,8 +67,8 @@ fn bench_lfpp(c: &mut Criterion) {
                 unsafe {
                     for _ in 0..WIT_DIM * K * N {
                         add_avx512(
-                            black_box(operand1.data),
-                            black_box(operand2.data),
+                            black_box(operand1.clone().data),
+                            black_box(operand2.clone().data),
                         );
                     }
                 }
@@ -76,26 +76,36 @@ fn bench_lfpp(c: &mut Criterion) {
         )
     });
 
-    // 443.76 ms
+    // 2.3844 s
     c.bench_function("lfpp compute extension commitment", |b| {
         b.iter_with_setup(
             || {
                 let mut operand1 = CyclotomicRing::<MOD_Q, N>::random();
-                let mut operand2 = CyclotomicRing::<MOD_Q, N>::random();
+                operand1.to_ntt_representation();
+                let mut operand2 = CyclotomicRing::<MOD_Q, N>::random_bounded(2);
                 (operand1, operand2)
             },
             |(mut operand1, mut operand2)| {
                 for _ in 0..WIT_DIM * LOG_B {
-                    fully_splitting_ntt_multiplication(&mut operand1, &mut operand2);
-                    unsafe {
-                        eltwise_add_mod(
-                            black_box(operand1.data).as_mut_ptr(),
-                            black_box(operand1.data).as_ptr(),
-                            black_box(operand2.data).as_ptr(),
-                            N as u64,
-                            MOD_Q,
-                        );
-                    }
+                    fully_splitting_ntt_multiplication(&mut operand1, &mut operand2.clone());
+                }
+
+            }, 
+        )
+    });
+
+    // 1.33452 s
+    c.bench_function("lfpp compute extension commitment larger decomp", |b| {
+        b.iter_with_setup(
+            || {
+                let mut operand1 = CyclotomicRing::<MOD_Q, N>::random();
+                operand1.to_ntt_representation();
+                let mut operand2 = CyclotomicRing::<MOD_Q, N>::random_bounded(4);
+                (operand1, operand2)
+            },
+            |(mut operand1, mut operand2)| {
+                for _ in 0..WIT_DIM * LOG_B / 2 {
+                    fully_splitting_ntt_multiplication(&mut operand1, &mut operand2.clone());
                 }
 
             }, 
@@ -107,7 +117,7 @@ fn bench_lfpp(c: &mut Criterion) {
 
 
 fn configure_criterion() -> Criterion {
-    Criterion::default().sample_size(10)
+    Criterion::default().sample_size(50)
 }
 
 criterion_group! {
