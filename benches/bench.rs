@@ -33,7 +33,7 @@ fn add_avx512(data: [u64; N], other: [u64; N]) -> [u64; N] {
 
 
 fn bench_lfpp(c: &mut Criterion) {
-    // 2.0432 s
+    // 2.4161
     c.bench_function("lfp compute double commitment", |b| {
         b.iter_with_setup(
             || {
@@ -57,7 +57,7 @@ fn bench_lfpp(c: &mut Criterion) {
         )
     });
 
-    // 1.3041 s
+    // 1.9497 s
     c.bench_function("lfp compute double commitment no mod", |b| {
         b.iter_with_setup(
             || {
@@ -78,7 +78,7 @@ fn bench_lfpp(c: &mut Criterion) {
         )
     });
 
-    // 2.3844 s
+    // 1.6817 s
     c.bench_function("lfpp compute extension commitment", |b| {
         b.iter_with_setup(
             || {
@@ -96,7 +96,7 @@ fn bench_lfpp(c: &mut Criterion) {
         )
     });
 
-    // 1.33452 s
+    // 841.72 ms s
     c.bench_function("lfpp compute extension commitment larger decomp", |b| {
         b.iter_with_setup(
             || {
