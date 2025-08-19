@@ -9,7 +9,8 @@ const N: usize = 64;
 const MOD_Q: u64 = 1125899904679937; // Example modulus IFMA
 // 1125899904679937
 const K: usize = 2; 
-const WIT_DIM: usize = 1048576; // 2^20
+// const WIT_DIM: usize = 1048576; // 2^20
+const WIT_DIM: usize = 1024; // 2^10
 const LOG_B:usize = 11;
 
 
@@ -33,29 +34,29 @@ fn add_avx512(data: [u64; N], other: [u64; N]) -> [u64; N] {
 
 
 fn bench_lfpp(c: &mut Criterion) {
-    // 2.4161
-    c.bench_function("lfp compute double commitment", |b| {
-        b.iter_with_setup(
-            || {
-                let mut operand1 = CyclotomicRing::<MOD_Q, N>::random();
-                let mut operand2 = CyclotomicRing::<MOD_Q, N>::random();
-                (operand1, operand2)
-            },
-            |(mut operand1, mut operand2)| {
-                unsafe {
-                    for _ in 0..WIT_DIM * K * N {
-                        eltwise_add_mod(
-                            black_box(operand1.clone().data).as_mut_ptr(),
-                            black_box(operand1.clone().data).as_ptr(),
-                            black_box(operand2.clone().data).as_ptr(),
-                            N as u64,
-                            MOD_Q,
-                        );
-                    }
-                }
-            }, 
-        )
-    });
+    // 3.2999s
+    // c.bench_function("lfp compute double commitment", |b| {
+    //     b.iter_with_setup(
+    //         || {
+    //             let mut operand1 = CyclotomicRing::<MOD_Q, N>::random();
+    //             let mut operand2 = CyclotomicRing::<MOD_Q, N>::random();
+    //             (operand1, operand2)
+    //         },
+    //         |(mut operand1, mut operand2)| {
+    //             unsafe {
+    //                 for _ in 0..WIT_DIM * K * N {
+    //                     eltwise_add_mod(
+    //                         black_box(operand1.clone().data).as_mut_ptr(),
+    //                         black_box(operand1.clone().data).as_ptr(),
+    //                         black_box(operand2.clone().data).as_ptr(),
+    //                         N as u64,
+    //                         MOD_Q,
+    //                     );
+    //                 }
+    //             }
+    //         }, 
+    //     )
+    // });
 
     const KAPPA_LFP: usize = 23;
 
@@ -88,6 +89,7 @@ fn bench_lfpp(c: &mut Criterion) {
                 let mut operand1 = CyclotomicRing::<MOD_Q, N>::random();
                 operand1.to_incomplete_ntt_representation();
                 let mut operand2 = CyclotomicRing::<MOD_Q, N>::random_bounded(2);
+                operand2.to_incomplete_ntt_representation();
                 let mut operand3 = CyclotomicRing::<MOD_Q, N>::random();
                 (operand1, operand2, operand3)
             },
@@ -96,9 +98,8 @@ fn bench_lfpp(c: &mut Criterion) {
                     operand3.clone().to_incomplete_ntt_representation();
                 }
                 for _ in 0..WIT_DIM * LOG_B * KAPPA_LFPP {
-                    incomplete_ntt_multiplication(&mut operand1, &mut operand2.clone(), true);
+                    incomplete_ntt_multiplication(&mut operand1, &mut operand2, true);
                 }
-
             }, 
         )
     });
@@ -128,8 +129,7 @@ fn bench_lfpp(c: &mut Criterion) {
 
 fn configure_criterion() -> Criterion {
     Criterion::default().sample_size(30)
-    .warm_up_time(Duration::from_secs(60))
-    .measurement_time(Duration::from_secs(180))
+    .warm_up_time(Duration::from_secs(10))
 }
 
 criterion_group! {
