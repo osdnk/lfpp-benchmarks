@@ -1,6 +1,6 @@
 #![feature(stdarch_x86_avx512)]
 
-use std::hint::black_box;
+use std::{hint::black_box, time::Duration};
 use ring_arith::{cyclotomic_ring::*, hexl::bindings::eltwise_add_mod};
 use criterion::{criterion_group, criterion_main, Criterion};
 
@@ -57,6 +57,8 @@ fn bench_lfpp(c: &mut Criterion) {
         )
     });
 
+    const KAPPA_LFP: usize = 23;
+
     // 1.9497 s
     c.bench_function("lfp compute double commitment no mod", |b| {
         b.iter_with_setup(
@@ -67,7 +69,7 @@ fn bench_lfpp(c: &mut Criterion) {
             },
             |(mut operand1, mut operand2)| {
                 unsafe {
-                    for _ in 0..WIT_DIM * K * N {
+                    for _ in 0..WIT_DIM * K * N * KAPPA_LFP {
                         add_avx512(
                             black_box(operand1.clone().data),
                             black_box(operand2.clone().data),
@@ -78,48 +80,56 @@ fn bench_lfpp(c: &mut Criterion) {
         )
     });
 
+    const KAPPA_LFPP: usize = 19;
     // 1.6817 s
     c.bench_function("lfpp compute extension commitment", |b| {
         b.iter_with_setup(
             || {
                 let mut operand1 = CyclotomicRing::<MOD_Q, N>::random();
-                operand1.to_ntt_representation();
+                operand1.to_incomplete_ntt_representation();
                 let mut operand2 = CyclotomicRing::<MOD_Q, N>::random_bounded(2);
-                (operand1, operand2)
+                let mut operand3 = CyclotomicRing::<MOD_Q, N>::random();
+                (operand1, operand2, operand3)
             },
-            |(mut operand1, mut operand2)| {
+            |(mut operand1, mut operand2, mut operand3)| {
                 for _ in 0..WIT_DIM * LOG_B {
-                    fully_splitting_ntt_multiplication(&mut operand1, &mut operand2.clone());
+                    operand3.clone().to_incomplete_ntt_representation();
+                }
+                for _ in 0..WIT_DIM * LOG_B * KAPPA_LFPP {
+                    incomplete_ntt_multiplication(&mut operand1, &mut operand2.clone(), true);
                 }
 
             }, 
         )
     });
 
-    // 841.72 ms s
-    c.bench_function("lfpp compute extension commitment larger decomp", |b| {
-        b.iter_with_setup(
-            || {
-                let mut operand1 = CyclotomicRing::<MOD_Q, N>::random();
-                operand1.to_ntt_representation();
-                let mut operand2 = CyclotomicRing::<MOD_Q, N>::random_bounded(4);
-                (operand1, operand2)
-            },
-            |(mut operand1, mut operand2)| {
-                for _ in 0..WIT_DIM * LOG_B / 2 {
-                    fully_splitting_ntt_multiplication(&mut operand1, &mut operand2.clone());
-                }
+    // // 841.72 ms s
+    // c.bench_function("lfpp compute extension commitment larger decomp", |b| {
+    //     b.iter_with_setup(
+    //         || {
+    //             let mut operand1 = CyclotomicRing::<MOD_Q, N>::random();
+    //             operand1.to_ntt_representation();
+    //             let mut operand2 = CyclotomicRing::<MOD_Q, N>::random_bounded(4);
+    //             operand2.to_ntt_representation();
+    //             (operand1, operand2)
+    //         },
+    //         |(mut operand1, mut operand2)| {
+    //             for _ in 0..WIT_DIM * LOG_B / 2 {
+    //                 incomplete_ntt_multiplication(&mut operand1, &mut operand2.clone(), true);
+    //             }
 
-            }, 
-        )
-    });
+    //         }, 
+    //     )
+    // });
 }
 
 
 
 
 fn configure_criterion() -> Criterion {
-    Criterion::default().sample_size(20)
+    Criterion::default().sample_size(30)
+    .warm_up_time(Duration::from_secs(60))
+    .measurement_time(Duration::from_secs(180))
 }
 
 criterion_group! {
