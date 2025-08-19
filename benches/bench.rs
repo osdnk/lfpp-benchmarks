@@ -9,8 +9,8 @@ const N: usize = 64;
 const MOD_Q: u64 = 1125899904679937; // Example modulus IFMA
 // 1125899904679937
 const K: usize = 2; 
-// const WIT_DIM: usize = 1048576; // 2^20
-const WIT_DIM: usize = 1024; // 2^10
+const WIT_DIM: usize = 1048576; // 2^20
+// const WIT_DIM: usize = 1024; // 2^10
 const LOG_B:usize = 11;
 
 
